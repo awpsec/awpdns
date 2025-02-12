@@ -1,27 +1,21 @@
 #!/bin/bash
 
-# Check if Python3 is installed
 if ! command -v python3 &> /dev/null; then
     echo "Python3 is not installed. Please install Python3 first."
     exit 1
 fi
 
-# Remove existing virtual environment if it exists
 rm -rf dns-env
 
-# Create virtual environment
 echo "Creating virtual environment dns-env..."
 python3 -m venv dns-env
 
-# Activate virtual environment
 echo "Activating virtual environment..."
 source dns-env/bin/activate
 
-# Upgrade pip
 echo "Upgrading pip..."
 python3 -m pip install --upgrade pip
 
-# Install system dependencies if running as root
 if [ "$EUID" -eq 0 ]; then
     echo "Installing system dependencies..."
     apt-get update
@@ -30,11 +24,9 @@ else
     echo "Warning: Not running as root. Please run 'sudo apt-get install nmap' manually if not already installed."
 fi
 
-# Install Python dependencies
 echo "Installing Python dependencies..."
 pip install -r requirements.txt
 
-# Create configuration file if it doesn't exist
 echo "Creating configuration file..."
 if [ ! -f "awpdns.conf" ]; then
     cat > awpdns.conf << EOL
