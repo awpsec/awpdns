@@ -20,6 +20,8 @@ git clone
 run the setup
 activate env
 
+add any API keys to the .conf
+
 run the tool
 
 WARNING: BY DEFAULT THIS PORT SCANS! USE -p FOR PASSIVE RECON
