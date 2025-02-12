@@ -26,10 +26,8 @@ import xlsxwriter
 from colorama import init, Fore, Style
 import configparser
 
-# Initialize colorama
 init()
 
-# Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -66,7 +64,6 @@ class DNSRecon:
         if not config_found:
             logging.warning("No configuration file found, using environment variables")
         
-        # API Keys (config file takes precedence over environment variables)
         self.shodan_api = (self.config.get('api_keys', 'shodan', fallback=None) 
                           or os.getenv('SHODAN_API_KEY'))
         self.vt_api = (self.config.get('api_keys', 'virustotal', fallback=None) 
@@ -74,14 +71,12 @@ class DNSRecon:
         self.rapid7_api = (self.config.get('api_keys', 'rapid7', fallback=None) 
                           or os.getenv('RAPID7_API_KEY'))
         
-        # Other settings
         self.resolver = dns.resolver.Resolver()
         self.resolver.timeout = self.config.getint('settings', 'timeout', fallback=5)
         self.resolver.lifetime = self.config.getint('settings', 'timeout', fallback=5)
         self.common_ports = self.config.get('settings', 'common_ports', 
             fallback="21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080")
         
-        # Configure requests session with retries
         self.session = requests.Session()
         retries = Retry(
             total=3,
@@ -103,21 +98,19 @@ class DNSRecon:
                     "domain": self.domain
                 }
                 
-                # Handle different record types
                 if record_type == 'NS':
-                    record["host"] = str(answer)  # Put nameserver in host field
+                    record["host"] = str(answer)
                     try:
-                        record["ip"] = socket.gethostbyname(str(answer))  # Resolve NS IP
+                        record["ip"] = socket.gethostbyname(str(answer))
                     except socket.gaierror:
                         record["ip"] = ""
                 elif record_type == 'TXT':
-                    record["ip"] = ""  # No IP for TXT records
+                    record["ip"] = ""
                     record["txt_record"] = str(answer)
                 elif record_type == 'A':
-                    # For A records, create a record for each IP
                     record["ip"] = str(answer)
                     records.append(record.copy())
-                    continue  # Skip the default append
+                    continue
                 else:
                     record["ip"] = str(answer)
                 
@@ -184,7 +177,6 @@ class DNSRecon:
         max_attempts = 3
         attempt = 0
 
-        # First check if we can resolve the API endpoint
         try:
             socket.gethostbyname('api.rapid7.com')
         except socket.gaierror:
@@ -201,7 +193,6 @@ class DNSRecon:
                 url = f"https://api.rapid7.com/v1/sonar/fdns/data"
                 params = {'query': f'domain: "{self.domain}"'}
                 
-                # Disable the retry mechanism for this request
                 with requests.Session() as session:
                     session.mount('https://', HTTPAdapter(max_retries=0))
                     response = session.get(url, headers=headers, params=params, timeout=30)
@@ -240,7 +231,6 @@ class DNSRecon:
         return list(discovered_domains)
 
     def get_virustotal_subdomains(self) -> List[str]:
-        #Get subdomains from VirusTotal.
         if not self.vt_api:
             if self.config.get('settings', 'verbose', fallback='false').lower() == 'true':
                 logging.info(f"{Fore.YELLOW}[*] Skipping VirusTotal enumeration (no API key){Style.RESET_ALL}")
@@ -250,10 +240,8 @@ class DNSRecon:
         try:
             client = vt.Client(self.vt_api)
             try:
-                # Get domain information
                 domain_obj = client.get_object(f"/domains/{self.domain}")
                 
-                # Get subdomains
                 try:
                     subdomains = domain_obj.get_attribute('subdomains') or []
                     for subdomain in subdomains:
@@ -262,7 +250,6 @@ class DNSRecon:
                 except Exception as e:
                     logging.debug(f"No subdomains found in VirusTotal data: {str(e)}")
 
-                # Get historical DNS records
                 try:
                     resolutions = domain_obj.get_attribute('historical_dns_records') or []
                     for resolution in resolutions:
@@ -292,7 +279,6 @@ class DNSRecon:
         """Get subdomains from all sources and validate them."""
         discovered_subdomains = set()
         
-        # Get subdomains from all sources
         crt_domains = self.get_crt_sh_subdomains()
         rapid7_domains = self.get_rapid7_subdomains()
         vt_domains = self.get_virustotal_subdomains()
@@ -301,7 +287,6 @@ class DNSRecon:
         discovered_subdomains.update(rapid7_domains)
         discovered_subdomains.update(vt_domains)
         
-        # Get custom subdomains from config
         if self.config.has_section('wordlist'):
             custom_subs = self.config.get('wordlist', 'custom_subdomains', fallback='')
             if custom_subs:
@@ -309,7 +294,6 @@ class DNSRecon:
                 for sub in custom_list:
                     discovered_subdomains.add(f"{sub}.{self.domain}")
         
-        # Add common subdomains
         wordlist = [
             "www", "mail", "ftp", "localhost", "webmail", "smtp", "pop", "ns1", "webdisk",
             "ns2", "cpanel", "whm", "autodiscover", "autoconfig", "m", "imap", "test",
@@ -368,7 +352,6 @@ class DNSRecon:
             obj = IPWhois(ip)
             results = obj.lookup_rdap()
             
-            # Get the most specific network range
             ip_range = results.get('network', {}).get('cidr', '')
             asn = results.get('asn')
             asn_str = f"AS{asn}" if asn else ""
@@ -386,16 +369,13 @@ class DNSRecon:
         if not data:
             return ""
         
-        # Remove SSL handshake data and binary content
         if isinstance(data, (bytes, bytearray)):
             return ""
         if data.startswith('\x16\x03') or data.startswith('\x80\x80'):
             return ""
             
-        # Clean HTTP responses
         if 'HTTP/' in data:
             try:
-                # Extract status line
                 status_line = data.split('\n')[0].strip()
                 if 'HTTP/' in status_line:
                     return status_line
@@ -403,16 +383,13 @@ class DNSRecon:
             except:
                 return ""
         
-        # Remove common noise words
         noise_words = ['cloud', 'auto']
         cleaned = data
         for word in noise_words:
             cleaned = cleaned.replace(word, '').strip()
         
-        # Remove non-printable characters
         cleaned = ''.join(c for c in cleaned if c.isprintable())
         
-        # Truncate long strings
         if len(cleaned) > 50:
             cleaned = cleaned[:47] + "..."
             
@@ -437,13 +414,11 @@ class DNSRecon:
                         port = service.get('port')
                         service_str = f"{port}"
                         
-                        # Add any meaningful service info we find
                         if service.get('product') and service['product'] != 'auto':
                             service_str += f":{service['product']}"
                             if service.get('version'):
                                 service_str += f" {service['version']}"
                         
-                        # Determine if it's HTTP based on actual data
                         is_http = (
                             service.get('http') is not None or
                             any(s.lower() in str(service).lower() for s in ['http', 'https', 'nginx', 'apache'])
@@ -466,16 +441,13 @@ class DNSRecon:
             
             return services
 
-        # Regular port scanning mode
         http_services = set()
         remote_services = set()
         
-        # Check if nmap is installed
         if not shutil.which("nmap"):
             logging.warning("Nmap is not installed. Skipping port scanning.")
             return {"http_services": "", "remote_services": ""}
 
-        # Nmap scan
         try:
             nm = nmap.PortScanner()
             ports = "-p-" if self.scan_all_ports else f"-p {self.common_ports}"
@@ -487,24 +459,19 @@ class DNSRecon:
                         service = nm[ip]['tcp'][port]
                         service_info = []
                         
-                        # Get service name
                         if service['name'] and service['name'] not in ['tcpwrapped', 'auto']:
                             service_info.append(service['name'])
                         
-                        # Add product if available and meaningful
                         if service.get('product') and service['product'] not in ['auto', service.get('name', '')]:
                             service_info.append(service['product'])
                         
-                        # Add version if available
                         if service.get('version'):
                             service_info.append(service['version'])
                         
-                        # Build service string
                         service_str = f"{port}"
                         if service_info:
                             service_str += f":{service_info[0]}"
                         
-                        # Determine if it's HTTP based on actual detection
                         is_http = (
                             service['name'] in ['http', 'https'] or
                             any(s.lower() in str(service_info).lower() for s in ['http', 'https', 'nginx', 'apache'])
@@ -546,7 +513,6 @@ class DNSRecon:
             'border': 1
         })
         
-        # Set column widths and format
         for idx, col in enumerate(df.columns):
             max_length = max(
                 df[col].astype(str).apply(len).max(),
@@ -554,11 +520,9 @@ class DNSRecon:
             )
             worksheet.set_column(idx, idx, min(max_length + 2, 50))
         
-        # Format header
         for col_num, value in enumerate(df.columns.values):
             worksheet.write(0, col_num, value, header_format)
         
-        # Format cells
         for row in range(1, len(df) + 1):
             for col in range(len(df.columns)):
                 worksheet.write(row, col, df.iloc[row-1, col], cell_format)
@@ -574,11 +538,9 @@ def main():
     parser.add_argument('-v', '--verbose', action='store_true', help='Show detailed progress and results')
     args = parser.parse_args()
 
-    # Create output directory if specified
     if args.output:
         os.makedirs(args.output, exist_ok=True)
 
-    # Initialize DNSRecon
     recon = DNSRecon(
         domain=args.domain,
         output_path=args.output or '.',
@@ -588,7 +550,6 @@ def main():
 
     print(f"\n{Fore.CYAN}[*] Starting DNS reconnaissance for {Fore.YELLOW}{args.domain}{Style.RESET_ALL}")
     
-    # Get DNS records
     results = []
     total_records = 0
     record_types = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'SOA']
@@ -607,7 +568,6 @@ def main():
     if not args.verbose:
         print(f"{Fore.GREEN}[+] Found {total_records} DNS records{Style.RESET_ALL}")
 
-    # Get subdomains
     print(f"\n{Fore.CYAN}[*] Enumerating subdomains...{Style.RESET_ALL}")
     subdomains = recon.get_subdomains()
     results.extend(subdomains)
@@ -615,12 +575,10 @@ def main():
     if not args.verbose:
         print(f"{Fore.GREEN}[+] Found {len(subdomains)} valid subdomains{Style.RESET_ALL}")
 
-    # Process results
     if results:
         print(f"\n{Fore.CYAN}[*] Gathering additional information...{Style.RESET_ALL}")
         df = pd.DataFrame(results)
         
-        # Ensure all required columns exist with proper names
         df = df.rename(columns={'host': 'Name'})
         if 'txt_record' not in df.columns:
             df['txt_record'] = ''
@@ -633,14 +591,11 @@ def main():
             'ip': 'IP'
         })
         
-        # Clean up IP addresses and filter out invalid ones
         def is_valid_ip(ip):
             if not ip:
                 return False
             try:
-                # Remove any trailing dots or spaces
                 ip = ip.strip('. ')
-                # Try to split by space and take first part (handles SOA records)
                 ip = ip.split()[0]
                 socket.inet_pton(socket.AF_INET, ip)
                 return True
@@ -651,10 +606,8 @@ def main():
                 except (socket.error, ValueError):
                     return False
             
-        # Clean IP addresses
         df['IP'] = df['IP'].astype(str).apply(lambda x: x.strip('. ').split()[0] if x else '')
         
-        # Add owner information and services for each unique valid IP
         unique_ips = [ip for ip in df['IP'].unique() if ':' not in ip]  # Simple check to exclude IPv6
         ip_info = {}
         
@@ -672,7 +625,6 @@ def main():
                 }
                 pbar.update(1)
         
-        # Add N/A for invalid IPs
         for ip in df['IP'].unique():
             if ip not in ip_info:
                 ip_info[ip] = {
@@ -683,17 +635,14 @@ def main():
                     'Remote Services': 'N/A'
                 }
         
-        # Map the information to DataFrame
         df['Owner'] = df['IP'].map(lambda x: ip_info[x]['Owner'])
         df['ASN'] = df['IP'].map(lambda x: ip_info[x]['ASN'])
         df['Range'] = df['IP'].map(lambda x: ip_info[x]['Range'])
         df['HTTP Services'] = df['IP'].map(lambda x: ip_info[x]['HTTP Services'])
         df['Remote Services'] = df['IP'].map(lambda x: ip_info[x]['Remote Services'])
         
-        # Add timestamp
         df['Date Discovered'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # Reorder columns in the requested format
         df = df[[
             'Record Type',
             'Name',
@@ -708,10 +657,8 @@ def main():
             'Date Discovered'
         ]]
         
-        # Sort by record type
         df = df.sort_values('Record Type')
 
-        # Save results
         if args.output:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             csv_file = os.path.join(args.output, f'dns_recon_{timestamp}.csv')
@@ -724,7 +671,6 @@ def main():
             print(f"    CSV: {csv_file}")
             print(f"    Excel: {excel_file}")
         
-        # Display results only in verbose mode
         if args.verbose:
             print("\nReconnaissance Results:")
             print(df.to_string())
