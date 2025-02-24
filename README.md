@@ -1,7 +1,7 @@
 # awpdns
 dns/whois/portscan tool
 
-usage: awpdns.py [-h] [-d DOMAIN] [-o OUTPUT] [-a] [-p] [-v]
+usage: awpdns.py [-h] -d DOMAIN [-o OUTPUT] [-a] [-p] [-v]
 
 dns recon tool
 
