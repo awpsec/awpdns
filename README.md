@@ -1,19 +1,19 @@
 # awpdns
 dns tool
 
-usage: awpdns.py [-h] -d DOMAIN [-o OUTPUT] [-a] [-p] [-v]
+usage: awpdns.py [-h] [-d DOMAIN] [-o OUTPUT] [-a] [-p] [-v]
 
 dns recon tool
 
 options:
   -h, --help            show this help message and exit
   -d DOMAIN, --domain DOMAIN
-                        Target domain
+                        target domain
   -o OUTPUT, --output OUTPUT
-                        Output directory for results
-  -a, --all-ports       Scan all ports instead of common ports
-  -p, --passive         Passive mode - no port scanning
-  -v, --verbose         Show detailed progress and results
+                        output directory for results
+  -a, --all-ports       scan all ports instead of common ports
+  -p, --passive         passive mode - no port scanning
+  -v, --verbose         show detailed progress and results
 
 
 git clone
@@ -24,4 +24,4 @@ add any API keys to the .conf
 
 run the tool
 
-WARNING: BY DEFAULT THIS PORT SCANS! USE -p FOR PASSIVE RECON
+# WARNING: BY DEFAULT THIS PORT SCANS! USE -p FOR PASSIVE RECON
