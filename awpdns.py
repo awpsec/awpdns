@@ -48,9 +48,9 @@ class DNSRecon:
         # Load configuration
         self.config = configparser.ConfigParser()
         config_paths = [
-            'awpdns.conf',  # Current directory
-            os.path.expanduser('~/.config/awpdns/awpdns.conf'),  # User's config directory
-            '/etc/awpdns/awpdns.conf'  # System-wide config
+            'awpdns.conf',
+            os.path.expanduser('~/.config/awpdns/awpdns.conf'),
+            '/etc/awpdns/awpdns.conf'
         ]
         
         config_found = False
@@ -102,6 +102,13 @@ class DNSRecon:
                     record["host"] = str(answer)
                     try:
                         record["ip"] = socket.gethostbyname(str(answer))
+                    except socket.gaierror:
+                        record["ip"] = ""
+                elif record_type == 'MX':
+                    mx_host = str(answer.exchange).rstrip('.')
+                    record["host"] = f"{answer.preference} {mx_host}"
+                    try:
+                        record["ip"] = socket.gethostbyname(mx_host)
                     except socket.gaierror:
                         record["ip"] = ""
                 elif record_type == 'TXT':
@@ -193,6 +200,7 @@ class DNSRecon:
                 url = f"https://api.rapid7.com/v1/sonar/fdns/data"
                 params = {'query': f'domain: "{self.domain}"'}
                 
+                # Disable the retry mechanism for this request
                 with requests.Session() as session:
                     session.mount('https://', HTTPAdapter(max_retries=0))
                     response = session.get(url, headers=headers, params=params, timeout=30)
@@ -382,14 +390,14 @@ class DNSRecon:
                 return ""
             except:
                 return ""
-        
+
         noise_words = ['cloud', 'auto']
         cleaned = data
         for word in noise_words:
             cleaned = cleaned.replace(word, '').strip()
-        
+
         cleaned = ''.join(c for c in cleaned if c.isprintable())
-        
+
         if len(cleaned) > 50:
             cleaned = cleaned[:47] + "..."
             
@@ -413,12 +421,12 @@ class DNSRecon:
                     for service in results['data']:
                         port = service.get('port')
                         service_str = f"{port}"
-                        
+
                         if service.get('product') and service['product'] != 'auto':
                             service_str += f":{service['product']}"
                             if service.get('version'):
                                 service_str += f" {service['version']}"
-                        
+
                         is_http = (
                             service.get('http') is not None or
                             any(s.lower() in str(service).lower() for s in ['http', 'https', 'nginx', 'apache'])
@@ -443,7 +451,7 @@ class DNSRecon:
 
         http_services = set()
         remote_services = set()
-        
+
         if not shutil.which("nmap"):
             logging.warning("Nmap is not installed. Skipping port scanning.")
             return {"http_services": "", "remote_services": ""}
@@ -458,20 +466,20 @@ class DNSRecon:
                     if nm[ip]['tcp'][port]['state'] == 'open':
                         service = nm[ip]['tcp'][port]
                         service_info = []
-                        
+
                         if service['name'] and service['name'] not in ['tcpwrapped', 'auto']:
                             service_info.append(service['name'])
-                        
+
                         if service.get('product') and service['product'] not in ['auto', service.get('name', '')]:
                             service_info.append(service['product'])
-                        
+
                         if service.get('version'):
                             service_info.append(service['version'])
                         
                         service_str = f"{port}"
                         if service_info:
                             service_str += f":{service_info[0]}"
-                        
+
                         is_http = (
                             service['name'] in ['http', 'https'] or
                             any(s.lower() in str(service_info).lower() for s in ['http', 'https', 'nginx', 'apache'])
@@ -494,39 +502,67 @@ class DNSRecon:
         """Export results to an Excel file with formatting."""
         writer = pd.ExcelWriter(output_file, engine='xlsxwriter')
         df.to_excel(writer, sheet_name='DNS Reconnaissance', index=False)
-        
+    
         workbook = writer.book
         worksheet = writer.sheets['DNS Reconnaissance']
-        
-        # Add formats
+    
         header_format = workbook.add_format({
+            'font_name': 'Consolas',
             'bold': True,
             'text_wrap': True,
-            'valign': 'top',
-            'bg_color': '#D9E1F2',
-            'border': 1
+            'valign': 'vcenter',
+            'align': 'center',
+            'bg_color': '#2F75B5',
+            'font_color': 'white',
+            'border': 1,
+            'border_color': '#1F4E78'
         })
-        
+    
         cell_format = workbook.add_format({
+            'font_name': 'Consolas',
             'text_wrap': True,
-            'valign': 'top',
-            'border': 1
+            'valign': 'vcenter',
+            'border': 1,
+            'border_color': '#B8CCE4'
         })
-        
+    
+        alt_row_format = workbook.add_format({
+            'font_name': 'Consolas',
+            'text_wrap': True,
+            'valign': 'vcenter',
+            'bg_color': '#EDF2F7',
+            'border': 1,
+            'border_color': '#B8CCE4'
+        })
+    
         for idx, col in enumerate(df.columns):
-            max_length = max(
-                df[col].astype(str).apply(len).max(),
-                len(col)
-            )
-            worksheet.set_column(idx, idx, min(max_length + 2, 50))
-        
+            if col in ['TXT Record', 'Owner']:
+                width = 40
+            elif col in ['HTTP Services', 'Remote Services']:
+                width = 30
+            else:
+                max_length = max(
+                    df[col].astype(str).apply(len).max(),
+                    len(col)
+                )
+                width = min(max_length + 8, 55)
+            worksheet.set_column(idx, idx, width)
+    
         for col_num, value in enumerate(df.columns.values):
             worksheet.write(0, col_num, value, header_format)
-        
+    
         for row in range(1, len(df) + 1):
+            row_format = alt_row_format if row % 2 == 0 else cell_format
             for col in range(len(df.columns)):
-                worksheet.write(row, col, df.iloc[row-1, col], cell_format)
-        
+                worksheet.write(row, col, df.iloc[row-1, col], row_format)
+    
+        worksheet.add_table(0, 0, len(df), len(df.columns) - 1, {
+            'style': 'Table Style Medium 2',
+            'columns': [{'header': col} for col in df.columns]
+        })
+
+        worksheet.freeze_panes(1, 0)
+    
         writer.close()
 
 def main():
@@ -549,7 +585,7 @@ def main():
     )
 
     print(f"\n{Fore.CYAN}[*] Starting DNS reconnaissance for {Fore.YELLOW}{args.domain}{Style.RESET_ALL}")
-    
+
     results = []
     total_records = 0
     record_types = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'SOA']
@@ -578,7 +614,7 @@ def main():
     if results:
         print(f"\n{Fore.CYAN}[*] Gathering additional information...{Style.RESET_ALL}")
         df = pd.DataFrame(results)
-        
+
         df = df.rename(columns={'host': 'Name'})
         if 'txt_record' not in df.columns:
             df['txt_record'] = ''
@@ -605,10 +641,10 @@ def main():
                     return True
                 except (socket.error, ValueError):
                     return False
-            
+
         df['IP'] = df['IP'].astype(str).apply(lambda x: x.strip('. ').split()[0] if x else '')
-        
-        unique_ips = [ip for ip in df['IP'].unique() if ':' not in ip]  # Simple check to exclude IPv6
+
+        unique_ips = [ip for ip in df['IP'].unique() if ':' not in ip]
         ip_info = {}
         
         with tqdm(total=len(unique_ips), 
@@ -624,7 +660,7 @@ def main():
                     'Remote Services': services['remote_services']
                 }
                 pbar.update(1)
-        
+
         for ip in df['IP'].unique():
             if ip not in ip_info:
                 ip_info[ip] = {
@@ -634,15 +670,15 @@ def main():
                     'HTTP Services': 'N/A',
                     'Remote Services': 'N/A'
                 }
-        
+
         df['Owner'] = df['IP'].map(lambda x: ip_info[x]['Owner'])
         df['ASN'] = df['IP'].map(lambda x: ip_info[x]['ASN'])
         df['Range'] = df['IP'].map(lambda x: ip_info[x]['Range'])
         df['HTTP Services'] = df['IP'].map(lambda x: ip_info[x]['HTTP Services'])
         df['Remote Services'] = df['IP'].map(lambda x: ip_info[x]['Remote Services'])
-        
+
         df['Date Discovered'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
+
         df = df[[
             'Record Type',
             'Name',
@@ -656,7 +692,7 @@ def main():
             'Remote Services',
             'Date Discovered'
         ]]
-        
+
         df = df.sort_values('Record Type')
 
         if args.output:
@@ -670,7 +706,7 @@ def main():
             print(f"{Fore.GREEN}[+] Results saved to:{Style.RESET_ALL}")
             print(f"    CSV: {csv_file}")
             print(f"    Excel: {excel_file}")
-        
+
         if args.verbose:
             print("\nReconnaissance Results:")
             print(df.to_string())
