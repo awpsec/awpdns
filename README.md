@@ -1,5 +1,5 @@
 # awpdns
-dns tool
+dns/whois/portscan tool
 
 usage: awpdns.py [-h] [-d DOMAIN] [-o OUTPUT] [-a] [-p] [-v]
 
