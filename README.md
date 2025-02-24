@@ -1,5 +1,5 @@
 # awpdns
-dns tool because some tools decided to become paid
+dns tool
 
 usage: awpdns.py [-h] -d DOMAIN [-o OUTPUT] [-a] [-p] [-v]
 
