@@ -566,12 +566,12 @@ class DNSRecon:
         writer.close()
 
 def main():
-    parser = argparse.ArgumentParser(description='DNS reconnaissance tool')
-    parser.add_argument('-d', '--domain', required=True, help='Target domain')
-    parser.add_argument('-o', '--output', help='Output directory for results')
-    parser.add_argument('-a', '--all-ports', action='store_true', help='Scan all ports instead of common ports')
-    parser.add_argument('-p', '--passive', action='store_true', help='Passive mode - no port scanning')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Show detailed progress and results')
+    parser = argparse.ArgumentParser(description='reconnaissance tool for dns/whois/portscan')
+    parser.add_argument('-d', '--domain', required=True, help='target domain')
+    parser.add_argument('-o', '--output', help='output directory for results')
+    parser.add_argument('-a', '--all-ports', action='store_true', help='scan all ports instead of common ports')
+    parser.add_argument('-p', '--passive', action='store_true', help='passive mode - no port scanning but shodan')
+    parser.add_argument('-v', '--verbose', action='store_true', help='show detailed progress and results')
     args = parser.parse_args()
 
     if args.output:
