@@ -45,7 +45,7 @@ logging.basicConfig(
 class DNSRecon:
     def __init__(self, domain: str, output_path: str, scan_mode: str = 'dns', 
                  top_ports: int = None, client_company: str = None, 
-                 email_format: str = None, cloud_enum: bool = False):
+                 email_format: str = None, cloud_enum: bool = False, verbose: bool = False):
         self.domain = domain
         self.output_path = output_path
         self.scan_mode = scan_mode  # 'dns', 'passive', or 'active'
@@ -53,6 +53,7 @@ class DNSRecon:
         self.client_company = client_company
         self.email_format = email_format
         self.cloud_enum = cloud_enum
+        self.verbose = verbose
         self.results = []
         
         # Load configuration
@@ -97,6 +98,14 @@ class DNSRecon:
         )
         self.session.mount('https://', HTTPAdapter(max_retries=retries))
         self.session.mount('http://', HTTPAdapter(max_retries=retries))
+        
+        # Suppress urllib3 warnings and retry messages for cloud enumeration
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        # Set urllib3 logging to WARNING to suppress retry messages
+        urllib3_logger = logging.getLogger('urllib3.connectionpool')
+        urllib3_logger.setLevel(logging.WARNING)
 
     def get_dns_records(self, record_type: str) -> List[Dict[str, Any]]:
         """Query DNS records of specified type."""
@@ -137,19 +146,26 @@ class DNSRecon:
                 records.append(record)
             return records
         except dns.resolver.NoAnswer:
-            logging.info(f"No {record_type} records found for {self.domain}")
+            if self.verbose:
+                logging.info(f"No {record_type} records found for {self.domain}")
         except dns.resolver.NXDOMAIN:
             logging.error(f"Domain {self.domain} does not exist")
         except dns.exception.Timeout:
-            logging.warning(f"Timeout while querying {record_type} records for {self.domain}")
+            if self.verbose:
+                logging.warning(f"Timeout while querying {record_type} records for {self.domain}")
         except Exception as e:
-            logging.warning(f"Error querying {record_type} records: {str(e)}")
+            if self.verbose:
+                logging.warning(f"Error querying {record_type} records: {str(e)}")
         return []
 
     def get_crt_sh_subdomains(self) -> List[str]:
         """Get subdomains from crt.sh certificate transparency logs."""
         max_attempts = 3
         attempt = 0
+        
+        # Add a small delay to avoid rate limiting
+        time.sleep(1)
+        
         while attempt < max_attempts:
             try:
                 url = f"https://crt.sh/?q=%.{self.domain}&output=json"
@@ -172,7 +188,10 @@ class DNSRecon:
                     except json.JSONDecodeError:
                         logging.warning("Invalid JSON response from crt.sh")
                 else:
-                    logging.warning(f"crt.sh returned status code {response.status_code}")
+                    if response.status_code == 429:
+                        logging.info(f"{Fore.LIGHTBLUE_EX}[*] crt.sh rate limit reached (attempt {attempt + 1}/{max_attempts}){Style.RESET_ALL}")
+                    else:
+                        logging.warning(f"crt.sh returned status code {response.status_code}")
                 
             except requests.exceptions.Timeout:
                 logging.warning(f"Timeout connecting to crt.sh (attempt {attempt + 1}/{max_attempts})")
@@ -181,15 +200,17 @@ class DNSRecon:
             
             attempt += 1
             if attempt < max_attempts:
-                time.sleep(2 ** attempt)
+                # Longer delay for rate limiting issues
+                delay = 3 if attempt == 1 else 8  # 3s then 8s delays
+                time.sleep(delay)
         
-        logging.warning("Failed to retrieve data from crt.sh after all attempts")
+        logging.info(f"{Fore.LIGHTBLUE_EX}[*] Skipping crt.sh enumeration (rate limited or connection failed){Style.RESET_ALL}")
         return []
 
     def get_rapid7_subdomains(self) -> List[str]:
         """Get subdomains from Rapid7 Forward DNS dataset."""
         if not self.rapid7_api:
-            if self.config.get('settings', 'verbose', fallback='false').lower() == 'true':
+            if self.verbose:
                 logging.info(f"{Fore.LIGHTBLUE_EX}[*] Skipping Rapid7 enumeration (no API key supplied){Style.RESET_ALL}")
             return []
 
@@ -200,7 +221,8 @@ class DNSRecon:
         try:
             socket.gethostbyname('api.rapid7.com')
         except socket.gaierror:
-            logging.info(f"{Fore.LIGHTBLUE_EX}[*] Skipping Rapid7 enumeration (cannot resolve api.rapid7.com){Style.RESET_ALL}")
+            if self.verbose:
+                logging.info(f"{Fore.LIGHTBLUE_EX}[*] Skipping Rapid7 enumeration (cannot resolve api.rapid7.com){Style.RESET_ALL}")
             return []
 
         while attempt < max_attempts:
@@ -253,7 +275,7 @@ class DNSRecon:
 
     def get_virustotal_subdomains(self) -> List[str]:
         if not self.vt_api:
-            if self.config.get('settings', 'verbose', fallback='false').lower() == 'true':
+            if self.verbose:
                 logging.info(f"{Fore.LIGHTBLUE_EX}[*] Skipping VirusTotal enumeration (no API key supplied){Style.RESET_ALL}")
             return []
 
@@ -460,9 +482,11 @@ class DNSRecon:
                         services["remote_services"] = ", ".join(sorted(remote_services, key=lambda x: int(x.split(':')[0])))
                         
                 except shodan.APIError as e:
-                    logging.info(f"{Fore.LIGHTBLUE_EX}[*] Shodan API error for {ip}: {str(e)}{Style.RESET_ALL}")
+                    if self.verbose:
+                        logging.info(f"{Fore.LIGHTBLUE_EX}[*] Shodan API error for {ip}: {str(e)}{Style.RESET_ALL}")
                 except Exception as e:
-                    logging.info(f"{Fore.LIGHTBLUE_EX}[*] Error during Shodan lookup for {ip}: {str(e)}{Style.RESET_ALL}")
+                    if self.verbose:
+                        logging.info(f"{Fore.LIGHTBLUE_EX}[*] Error during Shodan lookup for {ip}: {str(e)}{Style.RESET_ALL}")
             
             return services
 
@@ -537,9 +561,10 @@ class DNSRecon:
             'category': 'Security Assessment'
         })
         
-        # Separate email records from other records
+        # Separate different record types into different sheets
         email_records = df[df['Record Type'] == 'EMAIL'].copy()
-        other_records = df[df['Record Type'] != 'EMAIL'].copy()
+        cloud_records = df[df['Record Type'] == 'CLOUD'].copy()
+        other_records = df[(df['Record Type'] != 'EMAIL') & (df['Record Type'] != 'CLOUD')].copy()
         
         # Use Open Sans Light - confirmed to display as thin/light in Excel
         thin_font_name = 'Open Sans Light'
@@ -576,7 +601,7 @@ class DNSRecon:
             'border_color': '#B8CCE4'
         })
         
-        # Email header format (different color)
+        # Email header format (green)
         email_header_format = workbook.add_format({
             'font_name': thin_font_name,
             'font_size': 11,
@@ -588,6 +613,20 @@ class DNSRecon:
             'font_color': 'white',
             'border': 1,
             'border_color': '#1E7E34'
+        })
+        
+        # Cloud header format (orange)
+        cloud_header_format = workbook.add_format({
+            'font_name': thin_font_name,
+            'font_size': 11,
+            'bold': True,
+            'text_wrap': True,
+            'valign': 'vcenter',
+            'align': 'center',
+            'bg_color': '#FF8C00',  # Orange for cloud resources
+            'font_color': 'white',
+            'border': 1,
+            'border_color': '#E67E00'
         })
         
 
@@ -625,28 +664,89 @@ class DNSRecon:
             
             worksheet.freeze_panes(1, 0)
         
-        # Create DNS Reconnaissance sheet
+        # Create DNS Reconnaissance sheet (always create)
         if len(other_records) > 0:
             other_records.to_excel(writer, sheet_name='DNS Reconnaissance', index=False, header=False)
             worksheet = writer.sheets['DNS Reconnaissance']
             format_worksheet(worksheet, other_records, header_format)
+        else:
+            # Create empty DNS sheet with headers
+            empty_dns_df = pd.DataFrame(columns=[
+                'Record Type', 'Name', 'IP', 'TXT Record', 'Domain', 'ASN', 
+                'Range', 'Owner', 'HTTP Services', 'Remote Services', 'Date Discovered'
+            ])
+            empty_dns_df.to_excel(writer, sheet_name='DNS Reconnaissance', index=False, header=False)
+            worksheet = writer.sheets['DNS Reconnaissance']
+            # Write headers only
+            for col_num, value in enumerate(empty_dns_df.columns.values):
+                worksheet.write(0, col_num, value, header_format)
+            # Add a "no data" message
+            worksheet.write(1, 0, "No DNS records found", cell_format)
+            worksheet.set_column(0, len(empty_dns_df.columns)-1, 20)
         
-        # Create Email Enumeration sheet
-        if len(email_records) > 0:
-            # Customize columns for email sheet
-            email_df = email_records.copy()
-            # Rename columns for better email context
-            email_df = email_df.rename(columns={
-                'Name': 'Email Address',
-                'TXT Record': 'Source/Notes'
-            })
-            # Remove irrelevant columns for emails
-            email_columns = ['Email Address', 'Source/Notes', 'Domain', 'Date Discovered']
-            email_df = email_df[email_columns]
-            
-            email_df.to_excel(writer, sheet_name='Email Enumeration', index=False, header=False)
-            worksheet = writer.sheets['Email Enumeration']
-            format_worksheet(worksheet, email_df, email_header_format)
+        # Create Email Enumeration sheet (always create if client enumeration was attempted)
+        if self.client_company:
+            if len(email_records) > 0:
+                # Customize columns for email sheet
+                email_df = email_records.copy()
+                # Rename columns for better email context
+                email_df = email_df.rename(columns={
+                    'Name': 'Email Address',
+                    'TXT Record': 'Source/Notes'
+                })
+                # Remove irrelevant columns for emails
+                email_columns = ['Email Address', 'Source/Notes', 'Domain', 'Date Discovered']
+                email_df = email_df[email_columns]
+                
+                email_df.to_excel(writer, sheet_name='Email Enumeration', index=False, header=False)
+                worksheet = writer.sheets['Email Enumeration']
+                format_worksheet(worksheet, email_df, email_header_format)
+            else:
+                # Create empty email sheet with headers
+                empty_email_df = pd.DataFrame(columns=[
+                    'Email Address', 'Source/Notes', 'Domain', 'Date Discovered'
+                ])
+                empty_email_df.to_excel(writer, sheet_name='Email Enumeration', index=False, header=False)
+                worksheet = writer.sheets['Email Enumeration']
+                # Write headers only
+                for col_num, value in enumerate(empty_email_df.columns.values):
+                    worksheet.write(0, col_num, value, email_header_format)
+                # Add a "no data" message
+                worksheet.write(1, 0, "No email addresses found", cell_format)
+                worksheet.write(1, 1, f"Company: {self.client_company}", cell_format)
+                worksheet.set_column(0, len(empty_email_df.columns)-1, 25)
+        
+        # Create Cloud Resources sheet (always create if cloud enumeration was attempted)
+        if self.cloud_enum:
+            if len(cloud_records) > 0:
+                # Customize columns for cloud sheet
+                cloud_df = cloud_records.copy()
+                # Rename columns for better cloud context
+                cloud_df = cloud_df.rename(columns={
+                    'Name': 'Cloud Resource URL',
+                    'TXT Record': 'Status/Response'
+                })
+                # Remove irrelevant columns for cloud resources
+                cloud_columns = ['Cloud Resource URL', 'Status/Response', 'Domain', 'Date Discovered']
+                cloud_df = cloud_df[cloud_columns]
+                
+                cloud_df.to_excel(writer, sheet_name='Cloud Resources', index=False, header=False)
+                worksheet = writer.sheets['Cloud Resources']
+                format_worksheet(worksheet, cloud_df, cloud_header_format)
+            else:
+                # Create empty cloud sheet with headers
+                empty_cloud_df = pd.DataFrame(columns=[
+                    'Cloud Resource URL', 'Status/Response', 'Domain', 'Date Discovered'
+                ])
+                empty_cloud_df.to_excel(writer, sheet_name='Cloud Resources', index=False, header=False)
+                worksheet = writer.sheets['Cloud Resources']
+                # Write headers only
+                for col_num, value in enumerate(empty_cloud_df.columns.values):
+                    worksheet.write(0, col_num, value, cloud_header_format)
+                # Add a "no data" message
+                worksheet.write(1, 0, "No accessible cloud resources found", cell_format)
+                worksheet.write(1, 1, f"Domain checked: {self.domain}", cell_format)
+                worksheet.set_column(0, len(empty_cloud_df.columns)-1, 30)
         
 
         writer.close()
@@ -1063,10 +1163,20 @@ class DNSRecon:
         
         print(f"{Fore.CYAN}[*] Enumerating cloud resources...{Style.RESET_ALL}")
         
+        if self.verbose:
+            print(f"{Fore.CYAN}[*] Checking {len(cloud_patterns)} cloud resource patterns for {domain_base}{Style.RESET_ALL}")
+        
         def check_cloud_resource(resource_url):
             try:
-                response = self.session.head(resource_url, timeout=5)
+                # Create a session without retries for cloud enumeration to avoid verbose errors
+                cloud_session = requests.Session()
+                cloud_session.mount('https://', HTTPAdapter(max_retries=0))
+                cloud_session.mount('http://', HTTPAdapter(max_retries=0))
+                
+                response = cloud_session.head(resource_url, timeout=5)
                 if response.status_code in [200, 403, 301, 302]:
+                    if self.verbose:
+                        print(f"{Fore.GREEN}[+] Found cloud resource: {resource_url} (HTTP {response.status_code}){Style.RESET_ALL}")
                     return {
                         "host": resource_url,
                         "ip": "",
@@ -1074,7 +1184,13 @@ class DNSRecon:
                         "txt_record": f"HTTP {response.status_code}",
                         "domain": self.domain
                     }
-            except:
+            except (requests.exceptions.ConnectionError, 
+                    requests.exceptions.Timeout,
+                    requests.exceptions.RequestException):
+                # Silently ignore connection errors - expected for non-existent resources
+                pass
+            except Exception:
+                # Catch any other unexpected errors silently
                 pass
             return None
         
@@ -1095,6 +1211,8 @@ class DNSRecon:
         
         if cloud_resources:
             print(f"{Fore.GREEN}[+] Found {len(cloud_resources)} accessible cloud resources{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.LIGHTBLUE_EX}[*] No accessible cloud resources found{Style.RESET_ALL}")
         
         return cloud_resources
 
@@ -1128,6 +1246,16 @@ def main():
     if args.output:
         os.makedirs(args.output, exist_ok=True)
 
+    # Print logo
+    logo = r"""
+ ,--.  _   _   __  _ .--.   .--.  .---.  .---.
+`'_\ :[ \ [ \ [  ][ '/'`\ \( (`\]/ /__\\/ /'`\]
+// | |,\ \/\ \/ /  | \__/ | `'.'.| \__.,| \__.
+\'-;__/ \__/\__/   | ;.__/ [\__) )'.__.''.___.'
+                  [__|
+    """
+    print(f"{Fore.LIGHTBLUE_EX}{logo}{Style.RESET_ALL}")
+
     recon = DNSRecon(
         domain=args.domain,
         output_path=args.output or '.',
@@ -1135,7 +1263,8 @@ def main():
         top_ports=args.top_ports,
         client_company=args.client,
         email_format=args.email_format,
-        cloud_enum=args.cloud_enum
+        cloud_enum=args.cloud_enum,
+        verbose=args.verbose
     )
 
     print(f"\n{Fore.CYAN}[*] Starting DNS reconnaissance for {Fore.YELLOW}{args.domain}{Style.RESET_ALL}")
@@ -1178,8 +1307,7 @@ def main():
     if args.cloud_enum:
         cloud_resources = recon.enumerate_cloud_resources()
         results.extend(cloud_resources)
-        if not args.verbose and cloud_resources:
-            print(f"{Fore.GREEN}[+] Found {len(cloud_resources)} cloud resources{Style.RESET_ALL}")
+        # Cloud enumeration already prints its own summary message
 
     if results:
         print(f"\n{Fore.CYAN}[*] Gathering additional information...{Style.RESET_ALL}")
