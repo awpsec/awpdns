@@ -30,4 +30,5 @@ activate the environment
 run the tool:
 
 i.e. enumerate dns, whois, emails, cloud resources and shodan portscanning for client 'Example Company'
+
 `python3 awpdns.py -d example.xyz -client 'Example Company' -email {f}.{last}@example.xyz -o example -cloud -p`
