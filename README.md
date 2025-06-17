@@ -23,8 +23,11 @@ options:
 ```
 
 git clone the repo
+
 run the setup.sh script to create virtual environment, and install requirements inside of it
+
 add any API keys to the awpdns.conf config file
+
 activate the environment 
 
 run the tool:
