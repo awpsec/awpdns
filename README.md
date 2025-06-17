@@ -4,6 +4,7 @@ usage: awpdns.py [-h] -d DOMAIN [-o OUTPUT] [-p] [-a] [-t TOP_PORTS] [-v] [-clie
 
 reconnaissance tool for dns/whois/portscan
 
+```
 options:
   -h, --help            show this help message and exit
   -d, --domain DOMAIN   target domain
@@ -19,6 +20,7 @@ options:
                         email format for fallback google dorking generation - hunter.io pattern takes precedence (e.g., {f}{l}@domain.com, {first}.{last}@domain.com,
                         {f}.{l}@domain.com)
   -cloud, --cloud-enum  enumerate cloud resources
+```
 
 git clone the repo
 run the setup.sh script to create virtual environment, and install requirements inside of it
