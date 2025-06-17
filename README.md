@@ -22,13 +22,15 @@ options:
   -cloud, --cloud-enum  enumerate cloud resources
 ```
 
-git clone the repo
+setup
 
-run the setup.sh script to create virtual environment, and install requirements inside of it
+1. git clone the repo
 
-add any API keys to the awpdns.conf config file
+2. run the setup.sh script to create virtual environment, and install requirements inside of it
 
-activate the environment 
+3. add any API keys to the awpdns.conf config file
+
+4. activate the environment 
 
 run the tool:
 
