@@ -27,6 +27,8 @@ fi
 echo "Installing Python dependencies..."
 pip install -r requirements.txt
 
+
+
 echo "Creating configuration file..."
 if [ ! -f "awpdns.conf" ]; then
     cat > awpdns.conf << EOL
@@ -34,11 +36,14 @@ if [ ! -f "awpdns.conf" ]; then
 shodan = your_shodan_key_here
 virustotal = your_virustotal_key_here
 rapid7 = your_rapid7_key_here
+hunter = your_hunter_io_key_here
 
 [settings]
 common_ports = 21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080
 max_threads = 20
 timeout = 5
+
+
 
 [wordlist]
 # Add custom subdomains to check (one per line)
@@ -61,6 +66,7 @@ echo "2. Or set environment variables:"
 echo "   export SHODAN_API_KEY='your-api-key'"
 echo "   export VT_API_KEY='your-api-key'"
 echo "   export RAPID7_API_KEY='your-api-key'"
+echo "   export HUNTER_API_KEY='your-api-key'"
 echo -e "\nUsage example:"
 echo "python3 awpdns.py -d example.com -o ~/output/example"
 echo "python3 awpdns.py -d example.com -o ~/output/example -a  # scan all ports"
