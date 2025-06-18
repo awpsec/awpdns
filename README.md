@@ -2,7 +2,7 @@
 
 usage: awpdns.py [-h] -d DOMAIN [-o OUTPUT] [-p] [-a] [-t TOP_PORTS] [-v] [-client CLIENT] [-email EMAIL_FORMAT] [-cloud]
 
-reconnaissance tool for dns/whois/portscan
+reconnaissance tool for dns/whois/portscan--and now... more!
 
 ```
 options:
